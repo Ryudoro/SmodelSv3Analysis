@@ -19,7 +19,13 @@ class SLHAParser:
         for block, ids in self.config.items():
             for id_ in ids:
                 try:
-                    extracted_data[f"{block}_{id_}"] = slha_data.blocks[block].get(id_, None)
+                    if block not in ["NMIX", "UMIX", "VMIX"]:
+                        extracted_data[f"{block}_{id_}"] = slha_data.blocks[block].get(id_, None)
+                    else:
+                        extracted_data[f"{block}_{id_}"] = slha_data.blocks[block].get(id_//10, id_%10, None)
                 except:
-                    print(f"Error with block {block} and id {id}")
+                    try:
+                        extracted_data[f"{block}_{id_}"] = slha_data.blocks[block][id_//10, id_%10]
+                    except:
+                        print(f"Error with block {block} and id {id_}")
         return extracted_data
