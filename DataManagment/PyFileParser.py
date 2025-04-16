@@ -19,24 +19,51 @@ class PyFileParser:
             return []
 
         extracted_data = []
+        
+        # Explicitly retrieve 'input file' and 'OutputStatus' from data
+        input_file = data.get("input file", None)
+        output_status = data.get("OutputStatus", {})
+        
+        base_entry = {
+            "filename": file_path,
+            "input file": input_file,
+            "AnalysisID": None  # Default if ExptRes is absent
+        }
+        for key in self.config.get("OutputStatus", []):
+            base_entry[key] = output_status.get(key, None)
+        
         if "ExptRes" in data:
             for experiment in data["ExptRes"]:
-                extracted_entry = self._extract_from_experiment(experiment, data["OutputStatus"], file_path)
-                extracted_data.append(extracted_entry)
+                entry = base_entry.copy()  # Copy base entry for each experiment
+                entry["AnalysisID"] = experiment.get("AnalysisID")
+                
+                # Add experiment-specific fields
+                for key in self.config.get("ExptRes", []):
+                    if key == "TxNames":
+                        entry[key] = tuple(experiment.get(key, None))
+                        continue
+                    entry[key] = experiment.get(key, None)
+                
+                extracted_data.append(entry)
+        else:
+            # If ExptRes is not present, add the base entry
+            extracted_data.append(base_entry)
 
         return extracted_data
 
-    def _extract_from_experiment(self, experiment: Dict[str, Any], output_status: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+    def _extract_from_experiment(self, experiment: Dict[str, Any], output_status: Any, input_file: str, file_path: str) -> Dict[str, Any]:
         """
         Extract all the specific fields
         """
         entry = {
             "filename": file_path,  
-            "AnalysisID": experiment.get("AnalysisID")
+            "AnalysisID": experiment.get("AnalysisID"),
+            "input file": input_file,
+            "OutputStatus": output_status
         }
 
         for key in self.config.get("OutputStatus", []):
-            entry[key] = output_status.get(key, None)
+            entry[key] = output_status.get(key, None) if isinstance(output_status, dict) else output_status
 
         for key in self.config.get("ExptRes", []):
             entry[key] = experiment.get(key, None)

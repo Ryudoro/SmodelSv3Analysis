@@ -1,6 +1,6 @@
-from PyFileParser import PyFileParser
-from SLHAParser import SLHAParser
-from FileFinder import FileFinder
+from DataManagment.PyFileParser import PyFileParser
+from DataManagment.SLHAParser import SLHAParser
+from DataManagment.FileFinder import FileFinder
 
 import pandas as pd
 from typing import List
@@ -43,6 +43,7 @@ class DataAssembler:
         Check for missing fields in the DataFrame. If a required field is not present in the DataFrame,
         it's considered as missing.
         """
+        print(df.columns)
         missing_columns = [field for field in required_fields if field not in df.columns]
 
         if missing_columns:
@@ -56,20 +57,21 @@ class DataAssembler:
             missing_df = df
 
         return missing_df
-
+        
     def assemble_data(self, py_files: List[str], slha_files: List[str], use_cache: str = "csv", csv_file: str = "cache_output.csv", pickle_file: str = "cache_output.pkl") -> pd.DataFrame:
         """
         Load data from cache or process the files and save to cache.
         """
+        # Attempt to load from cache
         df = self.load_from_cache(use_cache, csv_file if use_cache == "csv" else pickle_file)
 
-        required_py_fields = ["filename"] + self.py_parser.config["OutputStatus"] + self.py_parser.config["ExptRes"]
+        required_py_fields = ["filename", "OutputStatus"] + self.py_parser.config["OutputStatus"] + self.py_parser.config["ExptRes"]
         required_slha_fields = [f"{block}_{id_}" for block, ids in self.slha_parser.config.items() for id_ in ids]
         required_fields = required_py_fields + required_slha_fields
 
+        # Check if cache was loaded successfully
         if not df.empty:
             print("Data loaded from cache.")
-            
             missing_df = self._check_missing_fields(df, required_fields)
 
             if missing_df.empty:
@@ -79,37 +81,60 @@ class DataAssembler:
                 print("Some required fields are missing, completing missing data.")
         else:
             print("Cache not found or empty, processing all files.")
-            df = pd.DataFrame()
+            # Initialize the DataFrame with required columns to avoid issues
+            df = pd.DataFrame(columns=required_fields)
 
+        # Prepare to store data
         all_data = []
-        for py_file in tqdm(py_files, desc="Traitement des fichiers .py", unit="fichier"):
+    
+        # Process each .py file
+        for py_file in tqdm(py_files, desc="Processing .py files", unit="file"):
             py_data = self.py_parser.extract_data_from_py(py_file)
-            for entry in py_data:
-                slha_file = entry.get("input file")
-                
-                if slha_file not in slha_files:
-                    print(f"SLHA file {slha_file} missing from provided files.")
-                    continue
-                
-                existing_entry = df[df["filename"] == entry["filename"]]
-                
-                if not existing_entry.empty:
-                    missing_fields = existing_entry.isnull().any(axis=1)
-
-                    if missing_fields.any():
-                        slha_data = self.slha_parser.extract_from_slha(slha_file)
-                        entry.update(slha_data)
-                        all_data.append(entry)
-                else:
+        
+            # If py_data is empty (missing fields other than OutputStatus), create a minimal entry
+            if not py_data:
+                entry = {
+                "filename": py_file,
+                "OutputStatus": 0  # Or any other status extracted directly from the file metadata
+            }
+                # Retrieve the associated .slha file data
+                slha_file = entry.get("input file")  # Assuming filename or input file is referenced in entry
+            
+                if slha_file in slha_files:
                     slha_data = self.slha_parser.extract_from_slha(slha_file)
                     entry.update(slha_data)
-                    all_data.append(entry)
+                else:
+                    print(f"SLHA file {slha_file} missing from provided files.")
+                all_data.append(entry)
+                continue
+        
+            # Process each entry in py_data as usual
+            for entry in py_data:
+                slha_file = entry.get("input file")
+            
+                # Check if the associated SLHA file exists
+                if slha_file in slha_files:
+                    slha_data = self.slha_parser.extract_from_slha(slha_file)
+                    entry.update(slha_data)
+                else:
+                    print(f"SLHA file {slha_file} missing from provided files.")
+                
+                all_data.append(entry)
+    
+        # Convert collected data to DataFrame
+        new_df = pd.DataFrame(all_data, columns=required_fields)
 
-        new_df = pd.DataFrame(all_data)
-
-        self.save_to_cache(new_df, csv_file, pickle_file)
-        return new_df
-
+        # Merge with existing data if there was some loaded from cache
+        if not df.empty:
+            df = pd.concat([df, new_df]).drop_duplicates().reset_index(drop=True)
+        else:
+            df = new_df
+    
+        # Save to cache for future use
+        self.save_to_cache(df, csv_file, pickle_file)
+    
+        return df
+    
 
 if __name__ == "__main__": 
     config_py = {
